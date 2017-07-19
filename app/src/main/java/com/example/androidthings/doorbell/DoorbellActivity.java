@@ -27,6 +27,8 @@ import android.util.Base64;
 import android.util.Log;
 
 import com.google.android.things.contrib.driver.button.Button;
+import com.google.android.things.pio.Gpio;
+import com.google.android.things.pio.PeripheralManagerService;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ServerValue;
@@ -74,7 +76,9 @@ public class DoorbellActivity extends Activity {
     /**
      * The GPIO pin to activate to listen for button presses.
      */
-    private final String BUTTON_GPIO_PIN = "BCM21";
+    private final String BUTTON_GPIO_PIN = "BCM5";
+    private static final String LED_PIN_NAME = "BCM6"; // GPIO port wired to the LED
+    private Gpio mLedGpio;
 
 
     @Override
@@ -101,16 +105,24 @@ public class DoorbellActivity extends Activity {
         mCloudThread.start();
         mCloudHandler = new Handler(mCloudThread.getLooper());
 
+        PeripheralManagerService service = new PeripheralManagerService();
+        Log.d(TAG, "Available GPIO: " + service.getGpioList());
+
         // Initialize the doorbell button driver
         try {
             mButton = new Button(BUTTON_GPIO_PIN, Button.LogicState.PRESSED_WHEN_LOW);
             mButton.setOnButtonEventListener(mButtonCallback);
+
+            mLedGpio = service.openGpio(LED_PIN_NAME);
+            // Step 2. Configure as an output.
+            mLedGpio.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW);
         } catch (IOException e) {
             Log.e(TAG, "button driver error", e);
         }
         // Camera code is complicated, so we've shoved it all in this closet class for you.
         mCamera = DoorbellCamera.getInstance();
         mCamera.initializeCamera(this, mCameraHandler, mOnImageAvailableListener);
+
     }
 
 
@@ -126,6 +138,14 @@ public class DoorbellActivity extends Activity {
         } catch (IOException e) {
             Log.e(TAG, "button driver error", e);
         }
+
+        if (mLedGpio != null) {
+            try {
+                mLedGpio.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error on PeripheralIO API", e);
+            }
+        }
     }
 
     /**
@@ -138,6 +158,11 @@ public class DoorbellActivity extends Activity {
             if (pressed) {
                 // Doorbell rang!
                 Log.d(TAG, "button pressed");
+                try {
+                    mLedGpio.setValue(!mLedGpio.getValue());
+                } catch (IOException e) {
+                    Log.e(TAG, "Error on PeripheralIO API", e);
+                }
                 mCamera.takePicture();
             }
         }
